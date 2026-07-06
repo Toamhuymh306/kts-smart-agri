@@ -1,0 +1,1 @@
+# KTs Smart Agriculture AI Platform
