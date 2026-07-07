@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: KTs Smart Agriculture - WAF WebACL for CloudFront (must deploy in us-east-1)
+
+# ============================================================
+# Parameters
+# ============================================================
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    Description: Deployment environment name
+
+# ============================================================
+# Resources
+# ============================================================
+Resources:
+
+  # ----------------------------------------------------------
+  # WAF WebACL (Scope: CLOUDFRONT — must be in us-east-1)
+  # ----------------------------------------------------------
+  AgriWafWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub kts-smart-agri-waf-${Environment}
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub kts-smart-agri-waf-${Environment}
+      Rules:
+        # Rate limiting: max 1000 requests per 5 minutes per IP
+        - Name: RateLimitRule
+          Priority: 0
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitRule
+          Statement:
+            RateBasedStatement:
+              Limit: 1000
+              AggregateKeyType: IP
+        # AWS Managed Rules — Common Rule Set (SQLi, XSS, etc.)
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+        # AWS Managed Rules — Known Bad Inputs
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesKnownBadInputsRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+
+# ============================================================
+# Outputs
+# ============================================================
+Outputs:
+  WafWebAclArn:
+    Description: WAF WebACL ARN for CloudFront (use this in main stack)
+    Value: !GetAtt AgriWafWebAcl.Arn
+    Export:
+      Name: !Sub kts-smart-agri-waf-arn-${Environment}

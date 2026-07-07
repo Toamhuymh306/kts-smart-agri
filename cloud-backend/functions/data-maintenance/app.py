@@ -7,8 +7,10 @@ Flow:
   1. List all S3 objects under prefix uploads/
   2. Filter objects with LastModified > RETENTION_DAYS ago
   3. Batch delete qualifying S3 objects
-  4. Update corresponding DynamoDB records to status=ARCHIVED
+  4. Archive DynamoDB records ONLY for successfully deleted objects
   5. Log cleaned count to CloudWatch Logs
+
+Fix #7: Archive only records whose S3 object was actually deleted successfully.
 """
 
 import logging
@@ -45,17 +47,21 @@ def lambda_handler(event, context):
 
     if not old_objects:
         logger.info("Nothing to clean. Exiting.")
-        return {"cleaned": 0}
+        return {"cleaned": 0, "archived": 0}
 
-    deleted_count = _delete_s3_objects(old_objects)
-    archived_count = _archive_dynamodb_records(old_objects)
+    # Delete S3 objects and get back only the ones successfully deleted
+    successfully_deleted = _delete_s3_objects(old_objects)
+    logger.info("Successfully deleted %d S3 objects", len(successfully_deleted))
+
+    # Archive DynamoDB records only for successfully deleted objects
+    archived_count = _archive_dynamodb_records(successfully_deleted)
 
     logger.info(
         "Maintenance complete. Deleted S3 objects: %d, Archived DynamoDB records: %d",
-        deleted_count, archived_count
+        len(successfully_deleted), archived_count
     )
 
-    return {"cleaned": deleted_count, "archived": archived_count}
+    return {"cleaned": len(successfully_deleted), "archived": archived_count}
 
 
 def _list_old_objects(cutoff_date: datetime) -> list:
@@ -76,15 +82,21 @@ def _list_old_objects(cutoff_date: datetime) -> list:
     return old_objects
 
 
-def _delete_s3_objects(objects: list) -> int:
-    """Batch delete S3 objects (max 1000 per request)."""
-    deleted_count = 0
+def _delete_s3_objects(objects: list) -> list:
+    """
+    Batch delete S3 objects (max 1000 per request).
+    Returns list of objects that were SUCCESSFULLY deleted.
+    Fix #7: Only return confirmed-deleted objects for archiving.
+    """
+    successfully_deleted = []
     batch_size = 1000
 
     for i in range(0, len(objects), batch_size):
-        batch = objects[i : i + batch_size]
+        batch = objects[i: i + batch_size]
+        key_map = {obj["Key"]: obj for obj in batch}
+
         delete_payload = {
-            "Objects": [{"Key": obj["Key"]} for obj in batch]
+            "Objects": [{"Key": key} for key in key_map]
         }
 
         try:
@@ -92,30 +104,42 @@ def _delete_s3_objects(objects: list) -> int:
                 Bucket=BUCKET_NAME,
                 Delete=delete_payload
             )
-            deleted = len(response.get("Deleted", []))
+
+            # Only track confirmed Deleted keys
+            for deleted in response.get("Deleted", []):
+                key = deleted["Key"]
+                if key in key_map:
+                    successfully_deleted.append(key_map[key])
+
             errors = response.get("Errors", [])
-            deleted_count += deleted
-
             if errors:
-                logger.warning("S3 delete errors: %s", errors)
+                logger.warning(
+                    "S3 delete errors for %d objects: %s",
+                    len(errors), errors
+                )
 
-            logger.info("Deleted batch of %d S3 objects", deleted)
+            logger.info(
+                "Batch result: %d deleted, %d errors",
+                len(response.get("Deleted", [])), len(errors)
+            )
+
         except ClientError as e:
             logger.error("Failed to delete S3 objects batch: %s", e)
 
-    return deleted_count
+    return successfully_deleted
 
 
-def _archive_dynamodb_records(objects: list) -> int:
+def _archive_dynamodb_records(successfully_deleted_objects: list) -> int:
     """
-    Update DynamoDB records to status=ARCHIVED for deleted S3 objects.
+    Update DynamoDB records to status=ARCHIVED.
+    Only called with objects confirmed deleted from S3.
     Key format: uploads/{userId}/{imageId}/{fileName}
     """
     archived_count = 0
+    updated_at = datetime.now(timezone.utc).isoformat()
 
-    for obj in objects:
+    for obj in successfully_deleted_objects:
         parts = obj["Key"].split("/")
-        # Expected: uploads / userId / imageId / fileName
         if len(parts) < 4 or parts[0] != "uploads":
             logger.warning("Skipping unexpected key format: %s", obj["Key"])
             continue
@@ -126,9 +150,12 @@ def _archive_dynamodb_records(objects: list) -> int:
         try:
             table.update_item(
                 Key={"userId": user_id, "imageId": image_id},
-                UpdateExpression="SET #status = :status",
+                UpdateExpression="SET #status = :status, updatedAt = :updatedAt",
                 ExpressionAttributeNames={"#status": "status"},
-                ExpressionAttributeValues={":status": "ARCHIVED"},
+                ExpressionAttributeValues={
+                    ":status":    "ARCHIVED",
+                    ":updatedAt": updated_at,
+                },
                 ConditionExpression="attribute_exists(userId)",
             )
             archived_count += 1
