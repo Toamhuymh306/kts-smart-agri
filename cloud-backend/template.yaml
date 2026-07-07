@@ -1,0 +1,454 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: KTs Smart Agriculture - Cloud Backend for AI Plant Disease Diagnosis
+
+# ============================================================
+# Parameters
+# ============================================================
+Parameters:
+  AdminEmail:
+    Type: String
+    Description: Email address to receive CloudWatch Alarm notifications
+  Environment:
+    Type: String
+    Default: prod
+    Description: Deployment environment name
+
+# ============================================================
+# Globals
+# NOTE: Runtime is NOT set here because AiInferenceFunction uses
+#       PackageType: Image which is incompatible with Runtime/Handler.
+#       Each zip-based function sets Runtime explicitly instead.
+# ============================================================
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        POWERTOOLS_SERVICE_NAME: kts-smart-agri
+
+# ============================================================
+# Resources
+# ============================================================
+Resources:
+
+  # ----------------------------------------------------------
+  # Cognito User Pool
+  # ----------------------------------------------------------
+  AgriUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub kts-smart-agri-user-pool-${Environment}
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  AgriUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub kts-smart-agri-client-${Environment}
+      UserPoolId: !Ref AgriUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+  # ----------------------------------------------------------
+  # API Gateway
+  # ----------------------------------------------------------
+  AgriApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub kts-smart-agri-api-${Environment}
+      StageName: !Ref Environment
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt AgriUserPool.Arn
+
+  # ----------------------------------------------------------
+  # S3 Bucket
+  # ----------------------------------------------------------
+  AgriImagesBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: AgriImagesBucketLambdaPermission
+    Properties:
+      BucketName: !Sub kts-smart-agri-images-${AWS::AccountId}-${Environment}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - PUT
+            AllowedOrigins:
+              - '*'
+            AllowedHeaders:
+              - '*'
+            MaxAge: 3000
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uploads/
+            Function: !GetAtt AiInferenceFunction.Arn
+
+  AgriImagesBucketLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt AiInferenceFunction.Arn
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub arn:aws:s3:::kts-smart-agri-images-${AWS::AccountId}-${Environment}
+
+  # ----------------------------------------------------------
+  # ECR Repository
+  # ----------------------------------------------------------
+  AgriEcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub kts-smart-agri-ai-inference-${Environment}
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  # ----------------------------------------------------------
+  # DynamoDB Table
+  # ----------------------------------------------------------
+  AgriDiagnosisTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub kts-smart-agri-diagnosis-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: imageId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+        - AttributeName: imageId
+          KeyType: RANGE
+
+  # ----------------------------------------------------------
+  # Lambda: presign-url
+  # ----------------------------------------------------------
+  PresignUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub kts-smart-agri-presign-url-${Environment}
+      CodeUri: functions/presign-url/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Description: Generate S3 Pre-signed PUT URL for image upload
+      Environment:
+        Variables:
+          IMAGES_BUCKET_NAME: !Ref AgriImagesBucket
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref AgriImagesBucket
+      Events:
+        PresignApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgriApi
+            Path: /images/presign
+            Method: POST
+
+  # ----------------------------------------------------------
+  # Lambda: ai-inference (Docker/ECR)
+  # PackageType: Image — Runtime and Handler must NOT be specified
+  # ----------------------------------------------------------
+  AiInferenceFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      DockerTag: latest
+      DockerContext: ./functions/ai-inference
+      Dockerfile: Dockerfile
+    Properties:
+      FunctionName: !Sub kts-smart-agri-ai-inference-${Environment}
+      PackageType: Image
+      Description: AI inference for plant disease diagnosis (mock)
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref AgriDiagnosisTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgriDiagnosisTable
+
+  # ----------------------------------------------------------
+  # Lambda: get-result
+  # ----------------------------------------------------------
+  GetResultFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub kts-smart-agri-get-result-${Environment}
+      CodeUri: functions/get-result/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Description: Get diagnosis result by imageId or list all results for a user
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref AgriDiagnosisTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgriDiagnosisTable
+      Events:
+        GetResultApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgriApi
+            Path: /images/{imageId}/result
+            Method: GET
+        ListImagesApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgriApi
+            Path: /images
+            Method: GET
+
+  # ----------------------------------------------------------
+  # Lambda: data-maintenance
+  # ----------------------------------------------------------
+  DataMaintenanceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub kts-smart-agri-data-maintenance-${Environment}
+      CodeUri: functions/data-maintenance/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Description: Clean up old S3 images and archive DynamoDB records
+      Timeout: 300
+      Environment:
+        Variables:
+          IMAGES_BUCKET_NAME: !Ref AgriImagesBucket
+          DYNAMODB_TABLE_NAME: !Ref AgriDiagnosisTable
+          RETENTION_DAYS: '30'
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref AgriImagesBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgriDiagnosisTable
+      Events:
+        WeeklySchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 0 ? * SUN *)
+            Description: Weekly data maintenance every Sunday at 00:00 UTC
+
+  # ----------------------------------------------------------
+  # CloudWatch Log Groups (retention 30 days)
+  # ----------------------------------------------------------
+  PresignUrlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/kts-smart-agri-presign-url-${Environment}
+      RetentionInDays: 30
+
+  AiInferenceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/kts-smart-agri-ai-inference-${Environment}
+      RetentionInDays: 30
+
+  GetResultLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/kts-smart-agri-get-result-${Environment}
+      RetentionInDays: 30
+
+  DataMaintenanceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/kts-smart-agri-data-maintenance-${Environment}
+      RetentionInDays: 30
+
+  # ----------------------------------------------------------
+  # SNS Topic + Email Subscription
+  # ----------------------------------------------------------
+  AgriAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub kts-smart-agri-alerts-${Environment}
+
+  AgriAlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AgriAlertTopic
+      Protocol: email
+      Endpoint: !Ref AdminEmail
+
+  # ----------------------------------------------------------
+  # CloudWatch Alarms
+  # ----------------------------------------------------------
+  AiInferenceErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub kts-agri-ai-inference-errors-${Environment}
+      AlarmDescription: AI Inference Lambda error rate >= 1 in 5 minutes
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref AiInferenceFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgriAlertTopic
+
+  PresignUrlErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub kts-agri-presign-url-errors-${Environment}
+      AlarmDescription: PresignUrl Lambda error rate >= 1 in 5 minutes
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PresignUrlFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgriAlertTopic
+
+  DynamoDBSystemErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub kts-agri-dynamodb-system-errors-${Environment}
+      AlarmDescription: DynamoDB system errors >= 1 in 5 minutes
+      MetricName: SystemErrors
+      Namespace: AWS/DynamoDB
+      Dimensions:
+        - Name: TableName
+          Value: !Ref AgriDiagnosisTable
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgriAlertTopic
+
+  # ----------------------------------------------------------
+  # CloudTrail
+  # ----------------------------------------------------------
+  CloudTrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub kts-smart-agri-cloudtrail-${AWS::AccountId}-${Environment}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CloudTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailBucket.Arn
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub ${CloudTrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+  AgriCloudTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: CloudTrailBucketPolicy
+    Properties:
+      TrailName: !Sub kts-smart-agri-trail-${Environment}
+      IsLogging: true
+      S3BucketName: !Ref CloudTrailBucket
+      IncludeGlobalServiceEvents: true
+      IsMultiRegionTrail: false
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+          DataResources:
+            - Type: AWS::S3::Object
+              Values:
+                - !Sub ${AgriImagesBucket.Arn}/
+
+# ============================================================
+# Outputs
+# ============================================================
+Outputs:
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref AgriUserPool
+    Export:
+      Name: !Sub kts-smart-agri-user-pool-id-${Environment}
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref AgriUserPoolClient
+    Export:
+      Name: !Sub kts-smart-agri-user-pool-client-id-${Environment}
+
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${AgriApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+    Export:
+      Name: !Sub kts-smart-agri-api-endpoint-${Environment}
+
+  ImagesBucketName:
+    Description: S3 bucket name for images
+    Value: !Ref AgriImagesBucket
+    Export:
+      Name: !Sub kts-smart-agri-images-bucket-${Environment}
+
+  DiagnosisTableName:
+    Description: DynamoDB table name for diagnosis results
+    Value: !Ref AgriDiagnosisTable
+    Export:
+      Name: !Sub kts-smart-agri-diagnosis-table-${Environment}
+
+  EcrRepositoryUri:
+    Description: ECR repository URI for AI inference image
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AgriEcrRepository}
+    Export:
+      Name: !Sub kts-smart-agri-ecr-uri-${Environment}
