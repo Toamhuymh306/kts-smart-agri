@@ -33,8 +33,7 @@ ALLOWED_CONTENT_TYPES = {
     "image/png",
     "image/webp",
 }
-# Block path traversal and special characters
-UNSAFE_FILENAME_PATTERN = re.compile(r"[/\\\.]{2,}|[^\w.\-]")
+# Block path traversal and special characters — dùng trực tiếp trong re.match bên dưới
 
 
 def lambda_handler(event, context):

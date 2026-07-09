@@ -13,6 +13,9 @@ Parameters:
     Type: String
     Default: prod
     Description: Deployment environment name
+  WafAclArn:
+    Type: String
+    Description: WAF WebACL ARN từ waf-stack.yaml (deploy trước ở us-east-1)
 
 # ============================================================
 # Globals
@@ -74,6 +77,11 @@ Resources:
     Properties:
       Name: !Sub kts-smart-agri-api-${Environment}
       StageName: !Ref Environment
+      # CORS — cho phép browser (CloudFront/localhost) gọi API
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key'"
+        AllowMethods: "'GET,POST,OPTIONS'"
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
@@ -83,9 +91,49 @@ Resources:
   # ----------------------------------------------------------
   # S3 Bucket
   # ----------------------------------------------------------
+  # ----------------------------------------------------------
+  # SQS Queue — buffer giữa S3 trigger và AI Inference Lambda
+  # S3 → SQS → Lambda (thay vì S3 → Lambda trực tiếp)
+  # ----------------------------------------------------------
+  AgriInferenceQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub kts-smart-agri-inference-${Environment}
+      VisibilityTimeout: 120        # >= Lambda timeout (60s) * 2
+      MessageRetentionPeriod: 86400 # 1 ngày
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AgriInferenceDLQ.Arn
+        maxReceiveCount: 3          # thử 3 lần trước khi gửi sang DLQ
+
+  # Dead Letter Queue — chứa message xử lý thất bại sau 3 lần
+  AgriInferenceDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub kts-smart-agri-inference-dlq-${Environment}
+      MessageRetentionPeriod: 1209600 # 14 ngày
+
+  # Policy cho phép S3 gửi message vào SQS
+  AgriInferenceQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref AgriInferenceQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowS3SendMessage
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt AgriInferenceQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:s3:::kts-smart-agri-images-${AWS::AccountId}-${Environment}
+
   AgriImagesBucket:
     Type: AWS::S3::Bucket
-    DependsOn: AgriImagesBucketLambdaPermission
+    DependsOn: AgriInferenceQueuePolicy
     Properties:
       BucketName: !Sub kts-smart-agri-images-${AWS::AccountId}-${Environment}
       PublicAccessBlockConfiguration:
@@ -97,29 +145,22 @@ Resources:
         CorsRules:
           - AllowedMethods:
               - PUT
+              - HEAD
             AllowedOrigins:
               - '*'
             AllowedHeaders:
               - '*'
             MaxAge: 3000
       NotificationConfiguration:
-        LambdaConfigurations:
+        # S3 gửi event vào SQS thay vì invoke Lambda trực tiếp
+        QueueConfigurations:
           - Event: s3:ObjectCreated:*
             Filter:
               S3Key:
                 Rules:
                   - Name: prefix
                     Value: uploads/
-            Function: !GetAtt AiInferenceFunction.Arn
-
-  AgriImagesBucketLambdaPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !GetAtt AiInferenceFunction.Arn
-      Principal: s3.amazonaws.com
-      SourceAccount: !Ref AWS::AccountId
-      SourceArn: !Sub arn:aws:s3:::kts-smart-agri-images-${AWS::AccountId}-${Environment}
+            Queue: !GetAtt AgriInferenceQueue.Arn
 
   # ----------------------------------------------------------
   # ECR Repository
@@ -130,6 +171,25 @@ Resources:
       RepositoryName: !Sub kts-smart-agri-ai-inference-${Environment}
       ImageScanningConfiguration:
         ScanOnPush: true
+
+  # ----------------------------------------------------------
+  # S3 Archive Bucket — lưu ảnh đã qua xử lý AI (bước 9)
+  # S3 Lifecycle Policy tự động xóa object sau 90 ngày
+  # ----------------------------------------------------------
+  AgriArchiveBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub kts-smart-agri-archive-${AWS::AccountId}-${Environment}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireProcessedImages
+            Status: Enabled
+            ExpirationInDays: 90
 
   # ----------------------------------------------------------
   # DynamoDB Table
@@ -144,11 +204,23 @@ Resources:
           AttributeType: S
         - AttributeName: imageId
           AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
       KeySchema:
         - AttributeName: userId
           KeyType: HASH
         - AttributeName: imageId
           KeyType: RANGE
+      # GSI cho GET /images — query theo userId, sort mới nhất lên đầu
+      GlobalSecondaryIndexes:
+        - IndexName: userId-createdAt-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   # ----------------------------------------------------------
   # Lambda: presign-url
@@ -194,9 +266,25 @@ Resources:
       Environment:
         Variables:
           DYNAMODB_TABLE_NAME: !Ref AgriDiagnosisTable
+          ARCHIVE_BUCKET_NAME: !Ref AgriArchiveBucket
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AgriDiagnosisTable
+        - S3ReadPolicy:
+            BucketName: !Ref AgriImagesBucket
+        - S3WritePolicy:
+            BucketName: !Ref AgriArchiveBucket
+        - SQSPollerPolicy:
+            QueueName: !GetAtt AgriInferenceQueue.QueueName
+      Events:
+        # SQS trigger: S3 → SQS → Lambda
+        InferenceQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AgriInferenceQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
 
   # ----------------------------------------------------------
   # Lambda: get-result
@@ -413,8 +501,51 @@ Resources:
               Values:
                 - !Sub ${AgriImagesBucket.Arn}/
 
-# ============================================================
-# Outputs
+  # ----------------------------------------------------------
+  # CloudFront Distribution
+  # Origin: API Gateway
+  # WAF: nhận qua Parameter WafAclArn (cross-region import không được phép)
+  # NOTE: deploy waf-stack.yaml ở us-east-1 trước, lấy ARN truyền vào WafAclArn
+  # ----------------------------------------------------------
+  AgriCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub KTS Smart Agriculture - ${Environment}
+        WebACLId: !Ref WafAclArn
+        # Origin: API Gateway endpoint
+        Origins:
+          - Id: ApiGatewayOrigin
+            DomainName: !Sub ${AgriApi}.execute-api.${AWS::Region}.amazonaws.com
+            OriginPath: !Sub /${Environment}
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        DefaultCacheBehavior:
+          TargetOriginId: ApiGatewayOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          # Không cache API responses
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled managed policy
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # AllViewerExceptHostHeader
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+        HttpVersion: http2
+        PriceClass: PriceClass_All
+
+  # ----------------------------------------------------------
+  # Outputs
 # ============================================================
 Outputs:
   UserPoolId:
@@ -452,3 +583,15 @@ Outputs:
     Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AgriEcrRepository}
     Export:
       Name: !Sub kts-smart-agri-ecr-uri-${Environment}
+
+  ArchiveBucketName:
+    Description: S3 archive bucket name for processed images
+    Value: !Ref AgriArchiveBucket
+    Export:
+      Name: !Sub kts-smart-agri-archive-bucket-${Environment}
+
+  CloudFrontDomain:
+    Description: CloudFront distribution domain — entry point cho mọi API call
+    Value: !GetAtt AgriCloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub kts-smart-agri-cloudfront-domain-${Environment}

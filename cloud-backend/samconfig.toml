@@ -16,7 +16,7 @@ capabilities       = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 confirm_changeset  = true
 resolve_s3         = true
 region             = "ap-southeast-1"
-parameter_overrides = "AdminEmail=your-email@example.com Environment=prod"
+parameter_overrides = "AdminEmail=your-email@example.com Environment=prod WafAclArn=arn:aws:wafv2:us-east-1:123456789012:global/webacl/kts-smart-agri-waf-prod/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 [default.sync.parameters]
 watch = true

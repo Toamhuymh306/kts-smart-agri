@@ -1,18 +1,19 @@
 """
 Lambda: ai-inference
-Triggered by S3 ObjectCreated event on prefix uploads/.
+Triggered by SQS (S3 → SQS → Lambda pipeline).
+S3 ObjectCreated event được wrap trong SQS message body.
 Runs mock plant disease inference and stores result in DynamoDB.
+Copies processed image key to Archive bucket.
 
 Flow:
-  1. Parse S3 event -> extract userId, imageId, s3Key
-  2. Write DynamoDB record: status=PROCESSING
-  3. Mock inference: random disease + confidence
-  4. Update DynamoDB record: status=COMPLETED
-  5. On any error after PROCESSING: update status=FAILED with errorMessage
-  6. Log all input/output to CloudWatch Logs
-
-Fix #5: Added FAILED status, errorMessage, updatedAt on exception.
-Fix #6: confidence stored as Decimal (number) instead of string.
+  1. Parse SQS record → unwrap S3 event from message body
+  2. Extract userId, imageId, s3Key from S3 key pattern
+  3. Write DynamoDB record: status=PROCESSING
+  4. Mock inference: random disease + confidence
+  5. Update DynamoDB record: status=COMPLETED
+  6. Copy S3 key reference to Archive bucket (Store Processed Image)
+  7. On any error after PROCESSING: update status=FAILED with errorMessage
+  8. Log all input/output to CloudWatch Logs
 """
 
 import json
@@ -30,8 +31,11 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource("dynamodb")
+s3_client = boto3.client("s3")
 
 TABLE_NAME = os.environ["DYNAMODB_TABLE_NAME"]
+ARCHIVE_BUCKET = os.environ.get("ARCHIVE_BUCKET_NAME", "")
+
 table = dynamodb.Table(TABLE_NAME)
 
 # Mock disease list for inference
@@ -47,16 +51,48 @@ DISEASES = [
 
 
 def lambda_handler(event, context):
-    logger.info("ai-inference triggered. Event: %s", json.dumps(event))
+    logger.info("ai-inference triggered via SQS. Records: %d", len(event.get("Records", [])))
 
-    for record in event.get("Records", []):
-        _process_record(record)
+    failed_message_ids = []
 
-    return {"statusCode": 200, "body": "OK"}
+    for sqs_record in event.get("Records", []):
+        message_id = sqs_record.get("messageId", "unknown")
+        try:
+            _process_sqs_record(sqs_record)
+        except Exception as e:
+            logger.error("Failed to process SQS messageId=%s: %s", message_id, e)
+            # ReportBatchItemFailures: trả về messageId thất bại để SQS retry riêng lẻ
+            failed_message_ids.append({"itemIdentifier": message_id})
+
+    if failed_message_ids:
+        return {"batchItemFailures": failed_message_ids}
+
+    return {}
 
 
-def _process_record(record: dict):
-    # --- Parse S3 key from event ---
+def _process_sqs_record(sqs_record: dict):
+    """
+    SQS record chứa S3 event trong field 'body' (JSON string).
+    Một SQS message có thể chứa nhiều S3 Records (thường là 1).
+    """
+    body = sqs_record.get("body", "{}")
+    try:
+        s3_event = json.loads(body)
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse SQS message body as JSON: %s | body=%s", e, body)
+        raise
+
+    s3_records = s3_event.get("Records", [])
+    if not s3_records:
+        logger.warning("No S3 Records in SQS message body, skipping")
+        return
+
+    for s3_record in s3_records:
+        _process_s3_record(s3_record)
+
+
+def _process_s3_record(record: dict):
+    """Xử lý một S3 ObjectCreated record."""
     bucket = record["s3"]["bucket"]["name"]
     raw_key = record["s3"]["object"]["key"]
     s3_key = urllib.parse.unquote_plus(raw_key)
@@ -93,7 +129,7 @@ def _process_record(record: dict):
         logger.error("Failed to write PROCESSING record: %s", e)
         raise
 
-    # --- Step 2: Mock inference (wrapped in try/except for FAILED status) ---
+    # --- Step 2: Mock inference ---
     try:
         result = random.choice(DISEASES)
         disease = result["disease"]
@@ -125,8 +161,25 @@ def _process_record(record: dict):
             user_id, image_id
         )
 
+        # --- Step 4: Copy key reference to Archive bucket (Store Processed Image) ---
+        if ARCHIVE_BUCKET:
+            archive_key = s3_key.replace("uploads/", "processed/", 1)
+            try:
+                s3_client.copy_object(
+                    CopySource={"Bucket": bucket, "Key": s3_key},
+                    Bucket=ARCHIVE_BUCKET,
+                    Key=archive_key,
+                )
+                logger.info(
+                    "Image archived: src=%s/%s dest=%s/%s",
+                    bucket, s3_key, ARCHIVE_BUCKET, archive_key
+                )
+            except ClientError as e:
+                # Archive failure không được block kết quả chẩn đoán
+                logger.warning("Failed to archive image (non-fatal): %s", e)
+
     except Exception as e:
-        # --- Step 4: Mark as FAILED if inference or DynamoDB update fails ---
+        # --- Step 5: Mark as FAILED ---
         error_message = str(e)
         logger.error(
             "Inference failed: userId=%s imageId=%s error=%s",

@@ -28,7 +28,11 @@ dynamodb = boto3.resource("dynamodb")
 
 BUCKET_NAME = os.environ["IMAGES_BUCKET_NAME"]
 TABLE_NAME = os.environ["DYNAMODB_TABLE_NAME"]
-RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "30"))
+try:
+    RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "30"))
+except ValueError:
+    logger.warning("Invalid RETENTION_DAYS value, using default 30")
+    RETENTION_DAYS = 30
 
 table = dynamodb.Table(TABLE_NAME)
 

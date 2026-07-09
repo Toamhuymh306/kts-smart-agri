@@ -12,6 +12,7 @@ Fix #4: Added pagination via limit + nextToken query params.
 Fix #8: Uses GSI userId-createdAt-index with ScanIndexForward=False (newest first).
 """
 
+import base64
 import json
 import logging
 import os
