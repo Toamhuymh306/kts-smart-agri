@@ -1,0 +1,13 @@
+# Model weight files (large binary files — download separately, not stored in git)
+ai-service/*.pth
+ai-service/*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp/debug scripts
+*.ps1
+*.py
+!cloud-backend/functions/**/*.py
+!cloud-backend/functions/**/*.py

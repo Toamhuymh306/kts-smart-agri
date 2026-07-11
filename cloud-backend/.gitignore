@@ -37,6 +37,9 @@ Thumbs.db
 .env
 .env.local
 
-# SAM deploy config (may contain email/account-specific values)
-# Rename samconfig.toml.example for reference, keep actual config local
-# samconfig.toml
+# SAM deploy config (contains email, account ID, WAF ARN — do not commit)
+# Copy samconfig.toml.example and fill in your own values
+samconfig.toml
+
+# Model weight files (large binary files — store separately, not in git)
+functions/ai-inference/*.pth
