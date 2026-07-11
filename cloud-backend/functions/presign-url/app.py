@@ -16,12 +16,22 @@ import re
 import uuid
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-s3_client = boto3.client("s3")
+# endpoint_url forces regional endpoint in presigned URLs — without this boto3 defaults
+# to s3.amazonaws.com (global) which returns 307 redirect that browsers cannot follow
+# for cross-origin PUT requests, causing a CORS error.
+_region = os.environ.get("AWS_REGION", "ap-southeast-1")
+s3_client = boto3.client(
+    "s3",
+    region_name=_region,
+    endpoint_url=f"https://s3.{_region}.amazonaws.com",
+    config=Config(signature_version="s3v4"),
+)
 
 BUCKET_NAME = os.environ["IMAGES_BUCKET_NAME"]
 PRESIGN_TTL_SECONDS = 300  # 5 minutes
@@ -88,6 +98,14 @@ def lambda_handler(event, context):
             },
             ExpiresIn=PRESIGN_TTL_SECONDS,
         )
+        # boto3 generates presigned URLs with the global endpoint (bucket.s3.amazonaws.com)
+        # even when endpoint_url is set. S3 then returns 307 redirect to the regional
+        # endpoint. Browsers cannot follow 307 redirects for cross-origin PUT requests,
+        # causing a CORS error. Rewrite to regional endpoint to avoid the redirect.
+        global_prefix = f"https://{BUCKET_NAME}.s3.amazonaws.com/"
+        regional_prefix = f"https://{BUCKET_NAME}.s3.{_region}.amazonaws.com/"
+        if upload_url.startswith(global_prefix):
+            upload_url = regional_prefix + upload_url[len(global_prefix):]
     except ClientError as e:
         logger.error("Failed to generate pre-signed URL: %s", e)
         return _response(500, {"message": "Internal Server Error"})

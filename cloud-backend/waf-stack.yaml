@@ -16,7 +16,7 @@ Parameters:
 Resources:
 
   # ----------------------------------------------------------
-  # WAF WebACL (Scope: CLOUDFRONT — must be in us-east-1)
+  # WAF WebACL (Scope: CLOUDFRONT -- must be in us-east-1)
   # ----------------------------------------------------------
   AgriWafWebAcl:
     Type: AWS::WAFv2::WebACL
@@ -43,7 +43,7 @@ Resources:
             RateBasedStatement:
               Limit: 1000
               AggregateKeyType: IP
-        # AWS Managed Rules — Common Rule Set (SQLi, XSS, etc.)
+        # AWS Managed Rules -- Common Rule Set (SQLi, XSS, etc.)
         - Name: AWSManagedRulesCommonRuleSet
           Priority: 1
           OverrideAction:
@@ -56,7 +56,7 @@ Resources:
             ManagedRuleGroupStatement:
               VendorName: AWS
               Name: AWSManagedRulesCommonRuleSet
-        # AWS Managed Rules — Known Bad Inputs
+        # AWS Managed Rules -- Known Bad Inputs
         - Name: AWSManagedRulesKnownBadInputsRuleSet
           Priority: 2
           OverrideAction:
