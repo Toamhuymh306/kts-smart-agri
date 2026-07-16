@@ -1,17 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { getDiagnosisResult } from '../services/imageService'
+import { useParams, useLocation, Link, useNavigate } from 'react-router-dom'
+import { getDiagnosisResult, deleteImage } from '../services/imageService'
 import StatusBadge from '../components/StatusBadge'
 import DiseaseCard from '../components/DiseaseCard'
 
-const POLL_INTERVAL_MS = 3000   // polling mỗi 3 giây khi status = PROCESSING
-const MAX_POLLS = 30            // tối đa 90 giây polling
+const POLL_INTERVAL_MS = 3000
+const MAX_POLLS = 30
 
 export default function ResultDetailPage() {
   const { imageId } = useParams()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const previewUrl = location.state?.previewUrl ?? null
+
   const [record, setRecord] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const pollCount = useRef(0)
   const timerRef = useRef(null)
 
@@ -20,8 +26,6 @@ export default function ResultDetailPage() {
     try {
       const data = await getDiagnosisResult(imageId)
       setRecord(data)
-
-      // Nếu vẫn đang PROCESSING → tiếp tục poll
       if (data.status === 'PROCESSING' && pollCount.current < MAX_POLLS) {
         pollCount.current += 1
         timerRef.current = setTimeout(fetchResult, POLL_INTERVAL_MS)
@@ -29,7 +33,6 @@ export default function ResultDetailPage() {
     } catch (err) {
       const status = err?.response?.status
       if (status === 202) {
-        // Backend trả 202 → PROCESSING
         setRecord({ imageId, status: 'PROCESSING' })
         if (pollCount.current < MAX_POLLS) {
           pollCount.current += 1
@@ -43,7 +46,6 @@ export default function ResultDetailPage() {
     } finally {
       setLoading(false)
     }
-  // fetchResult phụ thuộc vào imageId — khi imageId thay đổi sẽ tạo instance mới
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageId])
 
@@ -61,6 +63,21 @@ export default function ResultDetailPage() {
     setLoading(true)
     fetchResult()
   }
+
+  async function handleDelete() {
+    setDeleting(true)
+    try {
+      await deleteImage(imageId)
+      navigate('/results', { replace: true })
+    } catch (err) {
+      setError(err?.response?.data?.message ?? 'Xóa thất bại, vui lòng thử lại.')
+      setDeleting(false)
+      setShowDeleteConfirm(false)
+    }
+  }
+
+  // Ảnh hiển thị: ưu tiên imageUrl từ backend (presigned S3), fallback về previewUrl từ navigate state
+  const imageToShow = record?.imageUrl ?? previewUrl
 
   if (loading && !record) {
     return (
@@ -82,19 +99,46 @@ export default function ResultDetailPage() {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Chi tiết chẩn đoán</h1>
-          <p className="text-xs text-gray-400 font-mono mt-0.5 truncate max-w-xs">
-            ID: {imageId}
-          </p>
+        <h1 className="text-2xl font-bold text-gray-900">Chi tiết chẩn đoán</h1>
+        <div className="flex gap-2">
+          <button
+            onClick={handleRefresh}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            🔄 Làm mới
+          </button>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 bg-white border border-red-300 rounded-lg hover:bg-red-50 transition-colors"
+          >
+            🗑️ Xóa
+          </button>
         </div>
-        <button
-          onClick={handleRefresh}
-          className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-        >
-          🔄 Làm mới
-        </button>
       </div>
+
+      {/* Delete confirmation */}
+      {showDeleteConfirm && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-semibold text-red-800">Xác nhận xóa kết quả này?</p>
+          <p className="text-xs text-red-600">Hành động này sẽ xóa vĩnh viễn kết quả chẩn đoán và ảnh khỏi hệ thống.</p>
+          <div className="flex gap-3">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex-1 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              {deleting ? 'Đang xóa...' : 'Xác nhận xóa'}
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={deleting}
+              className="flex-1 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm font-semibold rounded-lg transition-colors"
+            >
+              Hủy
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -106,6 +150,17 @@ export default function ResultDetailPage() {
       {/* Record details */}
       {record && (
         <div className="space-y-4">
+          {/* Uploaded image */}
+          {imageToShow && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <img
+                src={imageToShow}
+                alt="Ảnh cây trồng"
+                className="w-full object-cover max-h-72"
+              />
+            </div>
+          )}
+
           {/* Status + timestamp */}
           <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between">
             <div>

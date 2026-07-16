@@ -186,7 +186,7 @@ export default function UploadPage() {
           </p>
           <div className="flex gap-3">
             <button
-              onClick={() => navigate(`/results/${resultImageId}`)}
+              onClick={() => navigate(`/results/${resultImageId}`, { state: { previewUrl: preview } })}
               className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors"
             >
               Xem kết quả →

@@ -70,3 +70,12 @@ export async function listDiagnoses() {
   const response = await apiClient.get('/images')
   return response.data
 }
+
+/**
+ * Xóa một kết quả chẩn đoán (DynamoDB record + S3 object)
+ * @param {string} imageId
+ */
+export async function deleteImage(imageId) {
+  const response = await apiClient.delete(`/images/${imageId}/result`)
+  return response.data
+}

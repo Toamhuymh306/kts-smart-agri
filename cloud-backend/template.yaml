@@ -298,11 +298,20 @@ Resources:
       Environment:
         Variables:
           DYNAMODB_TABLE_NAME: !Ref AgriDiagnosisTable
+          IMAGES_BUCKET_NAME: !Ref AgriImagesBucket
+          ARCHIVE_BUCKET_NAME: !Ref AgriArchiveBucket
       Policies:
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref AgriDiagnosisTable
+        - S3ReadPolicy:
+            BucketName: !Ref AgriImagesBucket
+        - S3ReadPolicy:
+            BucketName: !Ref AgriArchiveBucket
+        - S3CrudPolicy:
+            BucketName: !Ref AgriImagesBucket
+        - S3CrudPolicy:
+            BucketName: !Ref AgriArchiveBucket
       Events:
-        GetResultApi:
           Type: Api
           Properties:
             RestApiId: !Ref AgriApi
@@ -314,6 +323,12 @@ Resources:
             RestApiId: !Ref AgriApi
             Path: /images
             Method: GET
+        DeleteImageApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgriApi
+            Path: /images/{imageId}/result
+            Method: DELETE
 
   # ----------------------------------------------------------
   # Lambda: data-maintenance
