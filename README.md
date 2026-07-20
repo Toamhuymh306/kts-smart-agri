@@ -45,27 +45,9 @@ Frontend được lưu trong private Amazon S3 bucket tại Region `ap-southeast
 
 ## Kiến trúc hệ thống
 
-```mermaid
-flowchart LR
-    U[Người dùng] --> WEB[Frontend HTML/CSS/JS]
-    WEB --> COG[Amazon Cognito]
-    WEB --> API[Amazon API Gateway]
-    API --> PRE[Presign Lambda]
-    API --> RES[Results Lambda]
-    PRE --> RAW[(S3 Raw Images)]
-    WEB -->|Pre-signed PUT| RAW
-    RAW --> SQS[Amazon SQS]
-    SQS --> INF[Inference Lambda Container]
-    ECR[Amazon ECR] -. Container image .-> INF
-    INF --> REK[Amazon Rekognition]
-    INF --> DB[(Amazon DynamoDB)]
-    INF --> OUT[(S3 Processed Images)]
-    RES --> DB
-    RES --> OUT
-    PRE --> CW[Amazon CloudWatch]
-    INF --> CW
-    RES --> CW
-```
+<p align="center">
+  <img src="ai-service/diagram1.png" alt="Sơ đồ kiến trúc KTs Smart Agriculture trên AWS" width="100%">
+</p>
 
 Luồng xử lý chính:
 
@@ -102,6 +84,7 @@ kts-smart-agri/
 │   ├── kaggle/                     # Script huấn luyện và requirements
 │   ├── best_lenet_model.pth        # LeNet benchmark checkpoint
 │   ├── best_resnet_model.pth       # ResNet-50 production checkpoint
+│   ├── diagram1.png                 # Sơ đồ kiến trúc hệ thống AWS
 │   └── README.md
 ├── frontend-app/
 │   ├── backend/
