@@ -1,8 +1,7 @@
 param(
     [string]$Region = "ap-southeast-1",
     [string]$BucketName = "",
-    [string]$DistributionComment = "KTs Smart Agriculture frontend",
-    [switch]$DirectS3Website
+    [string]$DistributionComment = "KTs Smart Agriculture frontend"
 )
 
 $ErrorActionPreference = "Stop"
@@ -122,46 +121,6 @@ Invoke-AwsText -AwsArgs @(
 
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "kts-smartagri-cloudfront"
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-
-if ($DirectS3Website) {
-    Invoke-AwsText -AwsArgs @(
-        "s3api", "put-public-access-block",
-        "--bucket", $BucketName,
-        "--public-access-block-configuration",
-        "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
-    ) | Out-Null
-
-    Invoke-AwsText -AwsArgs @(
-        "s3api", "put-bucket-website",
-        "--bucket", $BucketName,
-        "--website-configuration", "IndexDocument={Suffix=index.html},ErrorDocument={Key=index.html}"
-    ) | Out-Null
-
-    $publicPolicyPath = Join-Path $tempDir "public-website-policy.json"
-    $publicPolicy = @{
-        Version = "2012-10-17"
-        Statement = @(
-            @{
-                Sid       = "PublicReadForStaticWebsite"
-                Effect    = "Allow"
-                Principal = "*"
-                Action    = "s3:GetObject"
-                Resource  = "arn:aws:s3:::$BucketName/*"
-            }
-        )
-    }
-    Write-JsonFile -Path $publicPolicyPath -Value $publicPolicy -Depth 6
-    Invoke-AwsText -AwsArgs @(
-        "s3api", "put-bucket-policy",
-        "--bucket", $BucketName,
-        "--policy", "file://$publicPolicyPath"
-    ) | Out-Null
-
-    Write-Output "Bucket: $BucketName"
-    Write-Output "Production URL: http://$BucketName.s3-website-$Region.amazonaws.com"
-    Write-Output "Mode: direct S3 static website (HTTP)"
-    return
-}
 
 $oacName = "kts-smartagri-frontend-oac"
 $oacList = Invoke-AwsJson -AwsArgs @("cloudfront", "list-origin-access-controls")

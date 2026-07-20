@@ -39,9 +39,9 @@ Các mục tiêu chính:
 
 ### Website production
 
-**[Mở KTs Smart Agriculture](http://kts-smartagri-frontend-929778605917.s3-website-ap-southeast-1.amazonaws.com/)**
+**[Mở KTs Smart Agriculture]("\ai-service\diagram1.png")**
 
-Frontend hiện được phục vụ 24/7 bằng Amazon S3 Static Website Hosting tại Region `ap-southeast-1`; máy phát triển không cần duy trì hoạt động.
+Frontend hiện được lưu trong private Amazon S3 bucket và phục vụ 24/7 qua AWS Amplify Hosting/CDN tại Region `ap-southeast-1`. Website sử dụng HTTPS và máy phát triển không cần duy trì hoạt động.
 
 ## Kiến trúc hệ thống
 
@@ -79,17 +79,17 @@ Luồng xử lý chính:
 
 ## Công nghệ sử dụng
 
-| Lớp | Công nghệ |
-|---|---|
-| Frontend | HTML5, CSS3, Vanilla JavaScript |
-| Authentication | Amazon Cognito User Pools, JWT |
-| API | Amazon API Gateway, AWS Lambda |
-| Event pipeline | Amazon S3, Amazon SQS |
-| AI inference | Python, PyTorch, TorchVision, Pillow |
-| Image validation | Amazon Rekognition `DetectLabels` |
-| Data | Amazon DynamoDB, Amazon S3 |
-| Container | Docker, Amazon ECR, Lambda container image |
-| Monitoring | Amazon CloudWatch |
+| Lớp              | Công nghệ                                  |
+| ---------------- | ------------------------------------------ |
+| Frontend         | HTML5, CSS3, Vanilla JavaScript            |
+| Authentication   | Amazon Cognito User Pools, JWT             |
+| API              | Amazon API Gateway, AWS Lambda             |
+| Event pipeline   | Amazon S3, Amazon SQS                      |
+| AI inference     | Python, PyTorch, TorchVision, Pillow       |
+| Image validation | Amazon Rekognition `DetectLabels`          |
+| Data             | Amazon DynamoDB, Amazon S3                 |
+| Container        | Docker, Amazon ECR, Lambda container image |
+| Monitoring       | Amazon CloudWatch                          |
 
 ## Cấu trúc source code
 
@@ -116,7 +116,8 @@ kts-smart-agri/
 │   ├── DEPLOYMENT.md
 │   └── README.md
 ├── scripts/
-│   └── deploy_frontend_s3.ps1   # Deploy/redeploy frontend lên S3 và CloudFront
+│   ├── deploy_frontend_amplify.ps1 # Redeploy S3 private lên Amplify HTTPS
+│   └── deploy_frontend_s3.ps1      # Thiết lập S3 và CloudFront/OAC
 ├── DEPLOYMENT_FIXES.md             # Checklist triển khai AI, history và Cognito
 ├── .gitignore
 └── README.md
@@ -167,13 +168,13 @@ Xem hướng dẫn chi tiết tại [`ai-service/README.md`](ai-service/README.m
 
 ## Triển khai AWS
 
-| Tài liệu | Nội dung |
-|---|---|
-| [Deployment checklist](DEPLOYMENT_FIXES.md) | Lambda container, Results API, migration và Cognito |
-| [AWS architecture](frontend-app/AWS_ARCHITECTURE.md) | Dịch vụ, data flow và IAM |
-| [Frontend deployment](frontend-app/DEPLOYMENT.md) | Chạy local, S3/CloudFront và kiểm tra sau deploy |
-| [Backend Lambda guide](frontend-app/backend/README.md) | Presign/Results Lambda và API Gateway |
-| [Cognito signup](frontend-app/COGNITO_SIGNUP.md) | Đăng ký và xác minh email |
+| Tài liệu                                               | Nội dung                                            |
+| ------------------------------------------------------ | --------------------------------------------------- |
+| [Deployment checklist](DEPLOYMENT_FIXES.md)            | Lambda container, Results API, migration và Cognito |
+| [AWS architecture](frontend-app/AWS_ARCHITECTURE.md)   | Dịch vụ, data flow và IAM                           |
+| [Frontend deployment](frontend-app/DEPLOYMENT.md)      | Chạy local, S3/CloudFront và kiểm tra sau deploy    |
+| [Backend Lambda guide](frontend-app/backend/README.md) | Presign/Results Lambda và API Gateway               |
+| [Cognito signup](frontend-app/COGNITO_SIGNUP.md)       | Đăng ký và xác minh email                           |
 
 PowerShell helper để build và cập nhật Lambda container:
 
@@ -184,15 +185,14 @@ cd ai-service/aws
 
 Hãy đọc script và thay đúng AWS account, Region, ECR repository và Lambda function trước khi chạy trong môi trường của bạn.
 
-Redeploy frontend tĩnh lên S3:
+Redeploy frontend tĩnh lên S3 private và Amplify HTTPS:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\deploy_frontend_s3.ps1 `
-  -DirectS3Website
+  -File .\scripts\deploy_frontend_amplify.ps1
 ```
 
-Script chỉ đưa `index.html`, `css/` và JavaScript production lên frontend bucket; backend, model, tài liệu và file test không được upload. Chế độ CloudFront/OAC đã được chuẩn bị trong cùng script để chuyển sang HTTPS sau khi tài khoản AWS được phép tạo CloudFront distribution.
+Script chỉ đưa `index.html`, `css/` và JavaScript production lên frontend bucket rồi khởi chạy Amplify deployment; backend, model, tài liệu và file test không được upload. Bucket chặn toàn bộ public access và chỉ cấp quyền đọc cho Amplify Hosting.
 
 ## Bảo mật
 
