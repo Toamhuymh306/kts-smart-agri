@@ -1,0 +1,8 @@
+.venv/
+**/__pycache__/
+*.pyc
+.git/
+aws/lambda_inference/tests/
+
+# Only the production ResNet checkpoint is copied explicitly by the Dockerfile.
+best_lenet_model.pth

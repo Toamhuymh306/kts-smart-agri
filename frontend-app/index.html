@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KTs Smart Agriculture - AI Image Analysis</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div id="auth-container" class="auth-container">
+      <div class="auth-card">
+        <div class="auth-header">
+          <h1>🌾 KTs Smart Agriculture</h1>
+          <p>AI-Powered Crop Analysis Platform</p>
+        </div>
+
+        <!-- Auth Tabs -->
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">Đăng nhập</button>
+          <button class="auth-tab" data-tab="signup">Đăng ký</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="login-form" class="auth-form active-form">
+          <div class="form-group">
+            <label for="login-email">Email</label>
+            <input type="email" id="login-email" required />
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" required />
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg">
+            <span id="login-text">Đăng nhập</span>
+            <span id="login-spinner" class="spinner hidden"></span>
+          </button>
+        </form>
+
+        <!-- Sign Up Form -->
+        <form id="signup-form" class="auth-form">
+          <div class="form-group">
+            <label for="signup-name">Họ và Tên</label>
+            <input type="text" id="signup-name" required />
+          </div>
+          <div class="form-group">
+            <label for="signup-email">Email</label>
+            <input type="email" id="signup-email" required />
+          </div>
+          <div class="form-group">
+            <label for="signup-password">Mật khẩu (min 8 ký tự)</label>
+            <input
+              type="password"
+              id="signup-password"
+              required
+              minlength="8"
+            />
+          </div>
+          <div class="form-group">
+            <label for="signup-password-confirm">Xác nhận mật khẩu</label>
+            <input
+              type="password"
+              id="signup-password-confirm"
+              required
+              minlength="8"
+            />
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg">
+            <span id="signup-text">Tạo tài khoản</span>
+            <span id="signup-spinner" class="spinner hidden"></span>
+          </button>
+        </form>
+
+        <!-- Confirm Email Form -->
+        <form id="confirm-form" class="auth-form">
+          <div class="auth-header">
+            <h2>Xác nhận Email</h2>
+            <p>Chúng tôi đã gửi mã xác nhận 6 số đến email của bạn.</p>
+          </div>
+          <div class="form-group">
+            <label for="confirm-email">Email</label>
+            <input type="email" id="confirm-email" readonly />
+          </div>
+          <div class="form-group">
+            <label for="confirm-code">Mã xác nhận (6 số)</label>
+            <input
+              type="text"
+              id="confirm-code"
+              maxlength="6"
+              placeholder="123456"
+              required
+              style="
+                text-align: center;
+                font-size: 1.3rem;
+                letter-spacing: 10px;
+              "
+            />
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg">
+            <span id="confirm-text">Xác nhận mã</span>
+            <span id="confirm-spinner" class="spinner hidden"></span>
+          </button>
+
+          <button
+            type="button"
+            id="resend-code-btn"
+            class="btn btn-outline-secondary"
+            style="margin-top: 10px"
+          >
+            Gửi lại mã
+          </button>
+
+          <p id="resend-status" class="form-status" aria-live="polite"></p>
+
+          <div style="margin-top: 15px; text-align: center">
+            <a href="#" id="back-to-signup" style="color: #666"
+              >← Quay lại đăng ký</a
+            >
+          </div>
+        </form>
+
+        <div id="auth-error" class="alert alert-error hidden"></div>
+        <div id="auth-success" class="alert alert-success hidden"></div>
+      </div>
+    </div>
+
+    <div id="app-container" class="app-container hidden">
+      <!-- Phần app giữ nguyên như cũ -->
+      <nav class="navbar">
+        <div class="navbar-content">
+          <div class="navbar-brand">
+            <h2>🌾 KTs Smart Agriculture</h2>
+          </div>
+          <div class="navbar-right">
+            <span id="user-name" class="user-name"></span>
+            <button id="logout-btn" class="btn btn-outline-secondary btn-sm">
+              Đăng xuất
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <main class="main-container">
+        <div class="content-wrapper">
+          <section class="upload-section card">
+            <div class="section-header">
+              <h2>📸 Phân tích cây trồng</h2>
+              <p>
+                Tải lên ảnh của cây trồng để AI phân tích tình trạng sức khỏe
+              </p>
+            </div>
+
+            <div id="drop-zone" class="drop-zone">
+              <div class="drop-zone-content">
+                <svg
+                  class="upload-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <h3>Kéo thả ảnh hoặc click để chọn</h3>
+                <input
+                  type="file"
+                  id="imageFile"
+                  accept="image/*"
+                  multiple
+                  style="display: none"
+                />
+              </div>
+            </div>
+
+            <div id="preview-section" class="preview-section hidden">
+              <div id="preview-grid" class="preview-grid"></div>
+              <div class="preview-actions">
+                <button id="clear-images-btn" class="btn btn-outline-secondary">
+                  Xóa tất cả
+                </button>
+                <button id="upload-btn" class="btn btn-primary">
+                  <span id="upload-text">Tải lên & Phân tích</span>
+                  <span id="upload-spinner" class="spinner hidden"></span>
+                </button>
+              </div>
+            </div>
+
+            <div id="progress-container" class="progress-container hidden">
+              <div class="progress-info">
+                <span id="progress-text">Đang tải...</span>
+                <span id="progress-percent">0%</span>
+              </div>
+              <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="results-section" class="results-section card hidden">
+            <div class="section-header">
+              <h2>📊 Kết quả phân tích</h2>
+            </div>
+            <div id="results-content" class="results-content"></div>
+          </section>
+
+          <section class="history-section card">
+            <div class="section-header">
+              <h2>📜 Lịch sử tải lên</h2>
+              <button
+                id="clear-history-btn"
+                class="btn btn-outline-secondary btn-sm"
+              >
+                Xóa lịch sử
+              </button>
+            </div>
+            <div id="history-list" class="history-list">
+              <p class="empty-state">Chưa có lịch sử tải lên</p>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@latest/dist/amazon-cognito-identity.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/app.js"></script>
+
+    <!-- Khởi tạo -->
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        console.log("🌱 Đang khởi tạo ứng dụng...");
+        let attempts = 0;
+        const maxAttempts = 30;
+
+        const initApp = setInterval(() => {
+          attempts++;
+          if (
+            typeof auth !== "undefined" &&
+            typeof ImageUploadApp !== "undefined"
+          ) {
+            clearInterval(initApp);
+            console.log("✅ Auth & App loaded thành công");
+            window.app = new ImageUploadApp();
+          }
+          if (attempts >= maxAttempts) {
+            clearInterval(initApp);
+            console.error("❌ Timeout: auth is not defined");
+          }
+        }, 100);
+      });
+    </script>
+  </body>
+</html>

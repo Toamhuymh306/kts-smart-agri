@@ -1,0 +1,27 @@
+# Local environments and generated Python files
+**/.venv/
+**/__pycache__/
+*.py[cod]
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# IDE and operating-system metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local notes and generated notebooks
+notepad codex-fix-prompt.md
+ai-service/notebook*.ipynb
+ai-service/*-smoke-test.py
+ai-service/test_model_local.py

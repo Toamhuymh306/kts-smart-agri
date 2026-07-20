@@ -1,0 +1,43 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRawImages",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::<RAW_BUCKET>/*"
+    },
+    {
+      "Sid": "WriteProcessedImages",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::<PROCESSED_BUCKET>/*"
+    },
+    {
+      "Sid": "WriteInferenceResult",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem", "dynamodb:UpdateItem"],
+      "Resource": "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/<RESULT_TABLE>"
+    },
+    {
+      "Sid": "ConsumeSQS",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "arn:aws:sqs:<REGION>:<ACCOUNT_ID>:<INFERENCE_QUEUE>"
+    },
+    {
+      "Sid": "CloudWatchLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

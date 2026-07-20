@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KTs - Backend Connection Test</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+
+      .container {
+        background: white;
+        border-radius: 12px;
+        padding: 40px;
+        max-width: 600px;
+        width: 100%;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+      }
+
+      h1 {
+        font-size: 24px;
+        margin-bottom: 30px;
+        color: #111;
+        text-align: center;
+      }
+
+      .test-item {
+        padding: 16px;
+        margin-bottom: 12px;
+        border-radius: 8px;
+        background: #f3f4f6;
+        border-left: 4px solid #ccc;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .test-item.success {
+        border-left-color: #2ecc71;
+        background: #f0fdf4;
+      }
+
+      .test-item.error {
+        border-left-color: #e74c3c;
+        background: #fef2f2;
+      }
+
+      .test-item.loading {
+        border-left-color: #3498db;
+        background: #f0f9ff;
+      }
+
+      .test-name {
+        font-weight: 600;
+        color: #374151;
+      }
+
+      .test-status {
+        font-size: 12px;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-weight: 600;
+      }
+
+      .test-status.success {
+        background: #2ecc71;
+        color: white;
+      }
+
+      .test-status.error {
+        background: #e74c3c;
+        color: white;
+      }
+
+      .test-status.loading {
+        background: #3498db;
+        color: white;
+      }
+
+      .details {
+        margin-top: 30px;
+        padding: 16px;
+        background: #f3f4f6;
+        border-radius: 8px;
+        font-size: 12px;
+        max-height: 200px;
+        overflow-y: auto;
+        font-family: monospace;
+        color: #4b5563;
+      }
+
+      .btn {
+        width: 100%;
+        padding: 12px;
+        margin-top: 20px;
+        background: linear-gradient(135deg, #2ecc71, #27ae60);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 12px rgba(46, 204, 113, 0.3);
+      }
+
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🔧 Backend Connection Test</h1>
+
+      <div id="tests"></div>
+
+      <button class="btn" onclick="runAllTests()" id="testBtn">
+        ▶️ Chạy kiểm tra
+      </button>
+
+      <div class="details" id="details"></div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script>
+      const tests = [
+        {
+          name: "✅ Config Loaded",
+          fn: testConfig,
+        },
+        {
+          name: "🌐 API Gateway Endpoint",
+          fn: testAPIEndpoint,
+        },
+        {
+          name: "🔐 Cognito Pool",
+          fn: testCognitoPool,
+        },
+        {
+          name: "📤 Presign API",
+          fn: testPresignAPI,
+        },
+      ];
+
+      const results = [];
+      const detailsEl = document.getElementById("details");
+      const testsEl = document.getElementById("tests");
+      const testBtn = document.getElementById("testBtn");
+
+      function log(msg) {
+        detailsEl.innerHTML += msg + "\n";
+        detailsEl.scrollTop = detailsEl.scrollHeight;
+      }
+
+      function testConfig() {
+        return new Promise((resolve) => {
+          try {
+            if (AWS_CONFIG && AWS_CONFIG.cognito && AWS_CONFIG.apiGateway) {
+              log("✓ Config loaded successfully");
+              resolve(true);
+            } else {
+              log("✗ Config is missing");
+              resolve(false);
+            }
+          } catch (e) {
+            log("✗ Error: " + e.message);
+            resolve(false);
+          }
+        });
+      }
+
+      function testAPIEndpoint() {
+        return new Promise((resolve) => {
+          try {
+            const endpoint = AWS_CONFIG.apiGateway.endpoint;
+            if (endpoint && endpoint.includes("execute-api")) {
+              log("✓ API endpoint: " + endpoint);
+              resolve(true);
+            } else {
+              log("✗ Invalid API endpoint");
+              resolve(false);
+            }
+          } catch (e) {
+            log("✗ Error: " + e.message);
+            resolve(false);
+          }
+        });
+      }
+
+      function testCognitoPool() {
+        return new Promise((resolve) => {
+          try {
+            const poolId = AWS_CONFIG.cognito.userPoolId;
+            if (poolId && poolId.includes("ap-southeast-1")) {
+              log("✓ Cognito Pool: " + poolId);
+              resolve(true);
+            } else {
+              log("✗ Invalid Cognito Pool ID");
+              resolve(false);
+            }
+          } catch (e) {
+            log("✗ Error: " + e.message);
+            resolve(false);
+          }
+        });
+      }
+
+      function testPresignAPI() {
+        return new Promise((resolve) => {
+          const endpoint =
+            AWS_CONFIG.apiGateway.endpoint + AWS_CONFIG.apiGateway.presignUrl;
+
+          fetch(endpoint, {
+            method: "OPTIONS",
+          })
+            .then((response) => {
+              log("✓ API Gateway CORS: " + response.status);
+              resolve(response.status < 500);
+            })
+            .catch((error) => {
+              log("⚠ API Gateway check: " + error.message);
+              resolve(false);
+            });
+        });
+      }
+
+      async function runAllTests() {
+        testBtn.disabled = true;
+        detailsEl.innerHTML = "";
+        results.length = 0;
+
+        for (const test of tests) {
+          const resultEl = document.getElementById(`test-${test.name}`);
+          resultEl.className = "test-item loading";
+          resultEl.querySelector(".test-status").textContent = "Checking...";
+
+          const success = await test.fn();
+          results.push({ name: test.name, success });
+
+          resultEl.className = success
+            ? "test-item success"
+            : "test-item error";
+          resultEl.querySelector(".test-status").textContent = success
+            ? "✅ OK"
+            : "❌ FAIL";
+        }
+
+        testBtn.disabled = false;
+
+        // Summary
+        const passed = results.filter((r) => r.success).length;
+        log("");
+        log("=== SUMMARY ===");
+        log(`Passed: ${passed}/${results.length}`);
+
+        if (passed === results.length) {
+          log("🎉 All systems GO! Chạy main app được.");
+        } else {
+          log("❌ Có vấn đề. Check config.js lại.");
+        }
+      }
+
+      // Render tests
+      testsEl.innerHTML = tests
+        .map(
+          (test) =>
+            `<div id="test-${test.name}" class="test-item">
+        <span class="test-name">${test.name}</span>
+        <span class="test-status">⏳ Waiting</span>
+      </div>`,
+        )
+        .join("");
+
+      log("🔍 Backend Connection Tester\n");
+      log("Config file: js/config.js");
+      log("API Endpoint: " + AWS_CONFIG.apiGateway.endpoint);
+      log("");
+    </script>
+  </body>
+</html>

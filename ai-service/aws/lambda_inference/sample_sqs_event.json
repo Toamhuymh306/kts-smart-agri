@@ -1,0 +1,7 @@
+{
+  "Records": [
+    {
+      "body": "{\"request_id\":\"req-001\",\"input_bucket\":\"kts-raw-images\",\"input_key\":\"uploads/leaf_001.jpg\",\"processed_bucket\":\"kts-processed-images\",\"result_table\":\"plant-inference-results\",\"user_id\":\"user-123\"}"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (nếu sau này dùng)
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build artifacts
+*.tmp
