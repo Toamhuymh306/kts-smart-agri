@@ -37,6 +37,12 @@ Các mục tiêu chính:
 
 <p align="center"><a href="https://youtu.be/PSYT_v13Lr4"><strong>▶ Xem video demo hệ thống</strong></a></p>
 
+### Website production
+
+**[Mở KTs Smart Agriculture](http://kts-smartagri-frontend-929778605917.s3-website-ap-southeast-1.amazonaws.com/)**
+
+Frontend hiện được phục vụ 24/7 bằng Amazon S3 Static Website Hosting tại Region `ap-southeast-1`; máy phát triển không cần duy trì hoạt động.
+
 ## Kiến trúc hệ thống
 
 ```mermaid
@@ -109,6 +115,8 @@ kts-smart-agri/
 │   ├── COGNITO_SIGNUP.md
 │   ├── DEPLOYMENT.md
 │   └── README.md
+├── scripts/
+│   └── deploy_frontend_s3.ps1   # Deploy/redeploy frontend lên S3 và CloudFront
 ├── DEPLOYMENT_FIXES.md             # Checklist triển khai AI, history và Cognito
 ├── .gitignore
 └── README.md
@@ -175,6 +183,16 @@ cd ai-service/aws
 ```
 
 Hãy đọc script và thay đúng AWS account, Region, ECR repository và Lambda function trước khi chạy trong môi trường của bạn.
+
+Redeploy frontend tĩnh lên S3:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\deploy_frontend_s3.ps1 `
+  -DirectS3Website
+```
+
+Script chỉ đưa `index.html`, `css/` và JavaScript production lên frontend bucket; backend, model, tài liệu và file test không được upload. Chế độ CloudFront/OAC đã được chuẩn bị trong cùng script để chuyển sang HTTPS sau khi tài khoản AWS được phép tạo CloudFront distribution.
 
 ## Bảo mật
 
