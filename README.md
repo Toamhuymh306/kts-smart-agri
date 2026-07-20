@@ -39,9 +39,9 @@ Các mục tiêu chính:
 
 ### Website production
 
-**[Mở KTs Smart Agriculture]("\ai-service\diagram1.png")**
+**[Mở KTs Smart Agriculture](https://d29ph563jlk62f.cloudfront.net/)**
 
-Frontend hiện được lưu trong private Amazon S3 bucket và phục vụ 24/7 qua AWS Amplify Hosting/CDN tại Region `ap-southeast-1`. Website sử dụng HTTPS và máy phát triển không cần duy trì hoạt động.
+Frontend được lưu trong private Amazon S3 bucket tại Region `ap-southeast-1` và phục vụ 24/7 qua Amazon CloudFront. CloudFront sử dụng Origin Access Control (OAC), tự chuyển HTTP sang HTTPS và áp dụng AWS Managed Security Headers Policy; máy phát triển không cần duy trì hoạt động.
 
 ## Kiến trúc hệ thống
 
@@ -116,8 +116,8 @@ kts-smart-agri/
 │   ├── DEPLOYMENT.md
 │   └── README.md
 ├── scripts/
-│   ├── deploy_frontend_amplify.ps1 # Redeploy S3 private lên Amplify HTTPS
-│   └── deploy_frontend_s3.ps1      # Thiết lập S3 và CloudFront/OAC
+│   ├── deploy_frontend_s3.ps1      # Production: private S3 + CloudFront/OAC
+│   └── deploy_frontend_amplify.ps1 # Amplify HTTPS fallback
 ├── DEPLOYMENT_FIXES.md             # Checklist triển khai AI, history và Cognito
 ├── .gitignore
 └── README.md
@@ -185,14 +185,15 @@ cd ai-service/aws
 
 Hãy đọc script và thay đúng AWS account, Region, ECR repository và Lambda function trước khi chạy trong môi trường của bạn.
 
-Redeploy frontend tĩnh lên S3 private và Amplify HTTPS:
+Redeploy frontend tĩnh lên private S3 và CloudFront:
 
 ```powershell
+$env:AWS_PROFILE = "bui-tuan-kiet"
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\deploy_frontend_amplify.ps1
+  -File .\scripts\deploy_frontend_s3.ps1
 ```
 
-Script chỉ đưa `index.html`, `css/` và JavaScript production lên frontend bucket rồi khởi chạy Amplify deployment; backend, model, tài liệu và file test không được upload. Bucket chặn toàn bộ public access và chỉ cấp quyền đọc cho Amplify Hosting.
+Script chỉ đưa `index.html`, `css/` và JavaScript production lên frontend bucket, sau đó tạo CloudFront invalidation; backend, model, tài liệu và file test không được upload. Bucket chặn toàn bộ public access và chỉ cấp quyền đọc cho CloudFront distribution thông qua OAC.
 
 ## Bảo mật
 
